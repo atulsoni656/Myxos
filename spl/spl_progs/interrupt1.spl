@@ -1,0 +1,131 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+alias systemcall_no S1;
+
+systemcall_no=[physicalSP-1];
+alias argument S2;
+argument=[physicalSP-3];
+
+if ( systemcall_no == 1) then		//impplementation of Create system call.
+  alias count S3;
+  alias newbasicblock S4;
+  count=FAT;
+  while(count<(FAT+512)) do 		//check whether filename already exists.
+     if([count]==argument)  then
+		   [physicalSP-2]=0;
+		   ireturn;
+     endif;
+     count=count+8;
+  endwhile;
+  count=DISK_LIST;
+  while(count<(DISK_LIST+448)) do 		//searching free block using disk free list.
+     if([count]==0) then
+       newbasicblock=count-DISK_LIST;
+       count=FAT;
+       while(count<(FAT+512)) do		//searching for free FAT entry.
+     		if([count+2]==-1)  then
+				[count]=argument; 	//assigning filename,size,#basicblock fields.
+				[count+1]=0;
+				[count+2]=newbasicblock;
+				load(1,newbasicblock);
+				alias count1 S5;
+				count1=SCRATCHPAD;
+				
+				while(count1<(SCRATCHPAD+256)) do  		//assigning -1 in basicblock entry as no data block.
+				   [count1]=-1;
+				   count1=count1+1;
+				endwhile;
+				
+			   store(1,newbasicblock);
+			   [newbasicblock+DISK_LIST]=1;			//updating diskfree list as used.
+			   
+			   store(5,19);					//store the changes in FAT and DFL on disk.
+			   store(6,20);
+			   
+			   [physicalSP-2]=0;
+			   ireturn;
+        
+     	    endif;
+     
+     		count=count+8;
+ 	 endwhile;
+     [physicalSP-2]=-1;
+	 ireturn;
+   endif;
+   
+   count=count+1;  
+ endwhile;
+ 
+ [physicalSP-2]=-1;
+ ireturn;
+endif;
+
+
+if ( systemcall_no == 4) then			//impplementation of Delete system call.
+	alias count S3;
+  	count=FAT;
+  	alias fatindex S4;
+  	alias flag S5;
+  	flag=0;
+  	while(count<(FAT+512)) do				//check whether file already exists.
+     		if([count]==argument)  then
+		   fatindex=(count-FAT)/8;             //storing fat index in register.
+		   flag=1;
+		   break;		
+        	endif;
+           count=count+8;
+  	endwhile;
+  if(flag==0) then
+    [physicalSP-2]=-1;
+    ireturn;
+  endif;
+  
+  flag=0;			//checking whether file is already open or not.
+  count= 0;
+	while ( count <  128) do			// 64 entries, each of size 2 words
+		if([FILE_TABLE + count]==fatindex) then
+	           [physicalSP-2]=-1;
+	           ireturn;
+	        endif;
+	  count = count + 2;			// Move to next entry
+	endwhile;
+	
+	count=0;
+alias count1 S6;
+alias basicblock S7;
+alias datablock S8;
+ basicblock=[fatindex*8 + FAT + 2];	
+	while(count<256) do
+	     load(1,basicblock);
+	     datablock=[SCRATCHPAD + count];
+	     	if (datablock==-1) then
+	     		break;
+	     	endif;
+	     load(1,datablock);
+	     count1=0;
+	     while(count1<512) do
+	         [SCRATCHPAD + count1]="";
+	         count1=count1+1;
+	     endwhile;
+	     store(1,datablock);
+	     [DISK_LIST + datablock]=0;
+	     count=count+1;
+	endwhile;
+	
+	load(1,basicblock);
+	count=0;
+	while(count1<256) do
+	         [SCRATCHPAD + count]="";
+	         count=count+1;
+	endwhile;
+	store(1,basicblock);
+	[DISK_LIST + basicblock]=0;
+	
+	[fatindex*8 + FAT + 0]=-1; 			//invalidate the FAt entry.
+	[fatindex*8 + FAT + 2]=-1;
+	store(5,19);
+	store(6,20);
+	
+	[physicalSP-2]=0;
+    ireturn;
+endif;	

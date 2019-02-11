@@ -1,0 +1,79 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+alias systemcall_no S1;
+
+systemcall_no=[physicalSP-1];
+
+if(systemcall_no==5) then   			//impplementation of Write system call.
+alias filedesc S2;
+alias wordtowrite S3;
+filedesc=[physicalSP-4];
+wordtowrite=[physicalSP-3];
+
+if(filedesc<0 || filedesc>7) then
+	[physicalSP-2]=-1;
+	ireturn;
+endif;
+
+alias pid S4;
+pid=(PTBR-1024)/8;
+	if([ READY_LIST + pid*32 + 15 + 2*filedesc ]==-1) then 
+	     [physicalSP-2]=-1;
+		ireturn;
+        endif;
+alias systemfiletableindex S5;
+alias lseek S6;
+systemfiletableindex=[ READY_LIST + pid*32 + 15 + 2*filedesc ] ;
+lseek=[ READY_LIST + pid*32 + 15 + 2*filedesc +1];
+
+alias fatindex S7;
+fatindex=[FILE_TABLE + 2*systemfiletableindex];
+
+alias basicblock S8;
+alias datablock S9;
+basicblock=[fatindex*8 + FAT + 2];
+alias flag S10;
+alias count S11;
+load(1,basicblock);
+
+if([SCRATCHPAD + (lseek/512)]==-1) then 
+  	flag=0;
+  	count=DISK_LIST;
+  	
+  	while(count<(DISK_LIST+448)) do
+     	    if([count]==0) then
+       	       [SCRATCHPAD + (lseek/512)]=count-DISK_LIST;
+       	       [count]=1;
+       	       flag=1;
+       	       break;
+	    endif;
+	     count=count+1;
+	endwhile;
+	
+	if(flag==0) then
+	   [physicalSP-2]=-1;
+	   ireturn;
+	endif;
+	
+	[fatindex*8 + FAT + 1]=[fatindex*8 + FAT + 1]+512;
+endif;
+
+datablock=[SCRATCHPAD + (lseek/512)];
+
+store(1,basicblock);
+
+store(5,19);
+store(6,20);
+
+load(1,datablock);
+ [SCRATCHPAD + (lseek%512)]=wordtowrite;
+ 
+ store(1,datablock);
+ 
+[ READY_LIST + pid*32 + 15 + 2*filedesc +1]=[ READY_LIST + pid*32 + 15 + 2*filedesc +1]+1;
+
+[physicalSP-2]=0;
+	   ireturn;
+
+endif;
+

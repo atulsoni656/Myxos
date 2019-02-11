@@ -1,0 +1,64 @@
+alias currentPID S0;
+currentPID = (PTBR - 1024) / 8;	//PID of the process currently executing
+
+alias currentPCB S1;
+currentPCB = READY_LIST + currentPID * 32;	//PCB of the the currently executing process
+
+[currentPCB + 1] = 1;	//Process state changed to ready from running
+
+[currentPCB + 2] = BP;
+[currentPCB + 3] = SP - 1;	//Whenever an interrupt happens IP is pushed onto the stack and SP is incremented by 1
+
+alias physicalSP S2;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);	
+
+[currentPCB + 4] = [physicalSP];	//store the IP which has now been pushed onto the stack and is on the top
+[currentPCB + 5] = PTBR;
+[currentPCB + 6] = PTLR;
+
+[currentPCB + 7] = R0;
+[currentPCB + 8] = R1;
+[currentPCB + 9] = R2;
+[currentPCB + 10] = R3;
+[currentPCB + 11] = R4;
+[currentPCB + 12] = R5;
+[currentPCB + 13] = R6;
+[currentPCB + 14] = R7;
+
+
+//round-robin scheduling
+
+alias counter S3;
+alias newPCB S4;
+counter = 1;
+while (counter <= 32) do
+	if ([READY_LIST + (((currentPID + counter) * 32) % 1024) + 1] == 1) then
+		newPCB = READY_LIST + (((currentPID + counter) * 32) % 1024);
+		break;
+	endif;
+	counter=counter+1;
+endwhile;
+
+BP = [newPCB + 2];
+SP = [newPCB + 3];
+
+PTBR = [newPCB + 5];
+PTLR = [newPCB + 6];
+
+R0 = [newPCB + 7];
+R1 = [newPCB + 8];
+R2 = [newPCB + 9];
+R3 = [newPCB + 10];
+R4 = [newPCB + 11];
+R5 = [newPCB + 12];
+R6 = [newPCB + 13];
+R7 = [newPCB + 14];
+
+SP = SP + 1; 
+alias newphysicalSP S5; 
+newphysicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); 
+[newphysicalSP] = [newPCB + 4];	   // Stores IP field value of PCB on the stack 
+
+[newPCB + 1] = 2;	//set the new process to running
+
+ireturn;

@@ -1,0 +1,101 @@
+
+load(7,1);	//exception handler
+load(8,2);
+load(23,17);    //interrupt 7
+load(24,18);
+
+load (9, 3);    // timer
+load (10, 4);
+[READY_LIST + 0] = 0;
+
+
+PTBR = 1024;
+PTLR = 4;
+[PTBR + 0] = 21; 
+[PTBR + 1] = "00"; 
+[PTBR + 2] = 22; 
+[PTBR + 3] = "00"; 
+[PTBR + 4] = 23; 
+[PTBR + 5] = "00"; 
+[PTBR + 6] = 28;  
+[PTBR + 7] = "01";
+
+[READY_LIST + 31] = 0;
+[READY_LIST + 1] = 2;
+
+load(5,19); //loading FAT
+load(6,20);  //loading  disk free list
+
+SP = 3 * 512;
+[28 * 512] = 0;
+
+load (11, 5);		//interrupt 1
+load (12, 6);
+load(13,7);		//interrupt 2
+load(14,8);
+load(15,9);		//intrrupt 3
+load(16,10);
+load(17,11);		//interrupt 4
+load(18,12);
+load(19,13);		//interrupt 5
+load(20,14);
+load(21,15);		//interrupt 6
+load(22,16);
+
+
+alias counter S0;			
+counter = 0;
+while ( counter <  128) do			// 64 entries, each of size 2 words
+	[ FILE_TABLE + counter + 0] = -1;	// Set FAT Index to -1
+	[ FILE_TABLE + counter + 1] =  0;	// Set File Open Count to 0
+	counter = counter + 2;			// Move to next entry
+endwhile;	
+
+			
+counter = 15;
+while ( counter < 30) do			// 8 entries, each of size 2 words
+	[ READY_LIST + counter + 0] = -1;	// Set Pointer to System-Wide Open File Table entry to -1
+	[ READY_LIST + counter + 1] = -1;	// Set Lseek position to 0
+	counter = counter + 2;			// Move to next entry
+endwhile;
+
+counter=0;				//initialising memory free list.
+while(counter<=24) do
+  [MEM_LIST + counter]=1;
+  counter=counter+1;
+  endwhile;
+  
+  [MEM_LIST + 25]=0;
+  [MEM_LIST + 26]=0;
+  [MEM_LIST + 27]=0;
+  
+  [MEM_LIST + 28]=1;
+  
+  counter=29;
+while(counter<64) do
+  [MEM_LIST + counter]=0;
+  counter=counter+1;
+  endwhile;
+  
+ counter=448;
+ while(counter<512) do
+   [DISK_LIST + counter]=0;
+   counter=counter + 1;
+ endwhile;
+ 
+ store(6,20);
+  
+  
+  counter=32; 			//initialising state for all PCBs to 0.
+  while(counter<1024) do
+  [READY_LIST + counter +1]=0;
+  counter=counter + 32;
+  endwhile;
+  
+  counter = 1472;
+           while(counter<1536) do
+            	[counter]="";
+                counter = counter + 1;
+           endwhile;
+  
+ireturn;

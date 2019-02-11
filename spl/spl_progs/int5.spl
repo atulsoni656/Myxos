@@ -1,0 +1,190 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP/512)] * 512) + (SP % 512);	//REMEMBER this always
+
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1];
+
+alias counter S2;
+
+if (sysCallNo == 8) then	//sysCallNo 8 --> FORK
+	alias freePCB S3;
+	
+	counter = 0;
+	while (counter < 32) do					//search for a freePCB to allocate to child process
+		if ([READY_LIST + (32 * counter) + 1] == 0) then
+			freePCB = READY_LIST + (32 * counter);		//freePCB --> state=0
+
+			[freePCB] = counter;		//setting the PID of the process to be the index in PCB
+
+			
+			counter = 0;
+			while (counter < 64) do		
+				if ([MEM_LIST + counter] == 0) then		//check if 1 free page is available in memory 											  free list to allocate as stack page to process
+					break;
+				endif;
+				
+				counter = counter + 1;
+			endwhile;
+			
+			//Implement Second Chance Algorithm
+			if (counter == 64) then 	//indicates that not even one free page was found
+				alias i S8;
+				counter = (PTBR - 1024)/8;	//...start from the current page table
+				alias search S9;
+				alias flag S10;
+				flag = 0;
+
+				while (1) do			//circularly search page table
+					alias PT S11;
+					PT = PAGE_TABLE + ((counter * 8) % 256);	//go to every process's page table
+
+					i=0;
+					while (i < 3) do					//then check each of its entries
+						if ([PT + i*2 + 1] == "01" && [MEM_LIST + [PT + i*2]] <= 1) then	//REPLACE this page --> reference bit is 0 AND page is NOT SHARED
+				
+							counter = [PT + i*2];	//this is the page that is going to be allocated to the new proc
+
+							search = 0;
+							while (search < 64) do
+								if ([DISK_LIST + 448 + search] == 0) then	//search for a free page in swap area
+									[DISK_LIST + 448 + search] = 1;		//indicates that it is used now
+
+									store ([PT + i*2], (448 + search));	//store the page to the disk
+
+									[PT + i*2] = 448 + search;	//update page table entry with the block 											  number in the disk
+									[PT + i*2 + 1] = "00";	//now invalid
+
+									break;	//IMPORTANT
+								endif;
+
+								search = search + 1;
+							endwhile;
+
+							if (search == 64) then	//no free block in the swap area --> failure
+								[physicalSP - 2] = -1;
+								ireturn;
+							else
+								flag = 1;		//indicates that page replacement is done
+								break;
+							endif;
+
+						endif;
+
+						if ([PT + i*2 + 1] == "11") then	//flip the reference bit to 0 if 1
+							[PT + i*2 + 1] = "01";
+						endif;
+
+						i = i + 1;
+					endwhile;
+
+					if (flag == 1) then 	//page replacement is over successfully
+						break;
+					endif;
+
+					counter = counter + 1;
+				endwhile;
+			endif;
+			
+			store (6, 20);	//changes have been made to the Disk List therefore COMMIT BACK
+
+			[MEM_LIST + counter] = 1;	//now allocate it to the child for the stack
+			
+			alias childPTBR S4;
+			childPTBR = (1024 + 8*[freePCB]);	//compute PTBR to copy all the parent's page table contents
+			
+			[childPTBR + 6] = counter;	//record this page in the child's page table
+			[childPTBR + 7] = "01";		//unreferenced and valid
+
+
+			alias parentPage S5;
+			alias childPage S6;
+			alias copy S7;
+
+			parentPage = [PTBR + 6] * 512;	//parent's stack page
+			childPage = counter * 512;		//childs's stack page
+
+			copy = 0;					
+	   		while (copy < 512) do			//copy the parent's entire stack page to the newly allocated page
+	   			
+	   			[childPage + copy] = [parentPage + copy];
+	   			
+				copy = copy + 1;
+			endwhile;	
+
+
+			counter = 0;
+			while (counter < 6) do
+				 
+				if ([PTBR + counter + 1] == "01" || [PTBR + counter + 1] == "11") then	//--> valid page in memory, increment in MEM_LIST to indicate shared with child process
+					 
+			   		[MEM_LIST + [PTBR + counter]] = [MEM_LIST + [PTBR + counter]] + 1;
+
+				endif;
+
+				if ([PTBR + counter] >= 448) then	//page is invalid and resides in the swap area of the disk
+
+					[DISK_LIST + [PTBR + counter]] = [DISK_LIST + [PTBR + counter]] + 1;	//now shared by 																	more than one process
+				endif;
+				
+				//common for all cases
+				[childPTBR + counter] = [PTBR + counter];	//copy the entires from the parent's PTBR
+			   	[childPTBR + counter + 1] = [PTBR + counter + 1];	//...
+
+				counter = counter + 2;
+			endwhile;
+
+			store (6, 20); //since the disk free list has been modified DON'T forget to store it back
+
+			[freePCB + 6] = PTLR;			//PTLR same for both processes
+			[freePCB + 5] = childPTBR;		//must fill in the PCB now, put in PTBR
+			[freePCB + 4] = [physicalSP];	//IP on top of stack is logical --> execution of child should 									  start from the same place as parent, store logical IP in PCB
+			[freePCB + 3] = SP - 1;			//SP-1 because it has been temporarily increased to store IP+2
+			[freePCB + 2] = BP;				//Store machine registers directly, DON'T copy from parentPCB
+			[freePCB + 7] = R0;				//...registers may have been saved some time ago in parent's PCB
+			[freePCB + 8] = R1;				//...and will not reflect current register values, child should
+			[freePCB + 9] = R2;				//...get register values of parent at the time FORK() is called
+			[freePCB + 10] = R3;			//...so copy them DIRECTLY
+			[freePCB + 11] = R4;			//...
+			[freePCB + 12] = R5;
+			[freePCB + 13] = R6;
+			[freePCB + 14] = R7;			//...
+			
+			[freePCB + 31] = (PTBR - 1024)/8;	//use 31st word to store parent's pid
+
+			alias SWOFT S12;	
+			alias PCB S13;
+			PCB = READY_LIST + (32 * ((PTBR-1024)/8));	//Must also copy PPOFT from parent to child
+			counter = 0;
+			
+			while (counter < 16) do
+				[freePCB + 15 + counter + 0] = [PCB + 15 + counter + 0];
+				[freePCB + 15 + counter + 1] = [PCB + 15 + counter + 1];
+				
+				if ([PCB + 15 + counter + 0] != -1) then		//if valid file must increase File Open Count in SWOFT
+					SWOFT = [PCB + 15 + counter + 0];
+					[FILE_TABLE + 2*SWOFT + 1] = [FILE_TABLE + 2*SWOFT + 1] + 1;
+
+				endif;
+								
+				counter = counter + 2;
+			endwhile;
+			
+			[freePCB + 1] = 1;		//put the child process in a ready state (1)
+			
+			[physicalSP - 2] = [freePCB];	//return value to the parent process is the PID of the child
+			
+			alias childSP S14;
+			childSP = [childPTBR + 2 * ((SP-1)/512)] * 512 + ((SP-1) % 512);	//calculate child's 																			physicalSP to put the return 																	 value 
+			
+			[childSP - 1] = -2;		//return value to the child process is -2 if successful
+			ireturn;
+			
+		endif;	
+		
+		counter = counter + 1;
+	endwhile;	
+
+	[physicalSP - 2] = -1;	//no freePCB is available --> failure
+	ireturn;
+	
+endif;

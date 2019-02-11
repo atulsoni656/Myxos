@@ -1,0 +1,103 @@
+alias physicalSP S0;
+physicalSP=[PTBR + 2*( SP/512)]*512 + (SP%512);
+alias systemcall_no S1;
+systemcall_no=[physicalSP - 1];
+alias counter S2;
+alias count S3;
+
+if(systemcall_no==9) then
+  alias filename S4;
+  alias newbasicblock S5;
+  alias basicblock S6;
+   filename=[physicalSP-3];
+   counter=0;
+   count=FAT;
+   while(count<FAT+512) do
+      if([count]==filename) then
+      counter=1;
+      newbasicblock=[count+2];
+      break;
+      endif;
+   count=count+8;
+   endwhile;
+   
+   if(counter==0) then
+     [physicalSP-2]=-1;
+     ireturn;
+   endif;
+   
+
+alias newdatablock S8;
+alias datablock S9;
+
+ counter=0;
+ load(1,newbasicblock);
+ 
+ while(counter<6) do
+   	if(([PTBR + counter +1]=="01") ||  ([PTBR + counter +1]=="11")) then
+          datablock=[PTBR + counter];
+          
+          [MEM_LIST + datablock ]= [MEM_LIST + datablock ] - 1;
+    endif;
+    if([PTBR + counter]>=448) then
+            datablock=[PTBR + counter];
+            [DISK_LIST + datablock]=[DISK_LIST + datablock] - 1;
+    endif;
+	
+	newdatablock=[SCRATCHPAD + counter/2];
+	[PTBR + counter]=newdatablock;
+    [PTBR + counter + 1]="00";
+	counter=counter+2;
+ endwhile;
+ 
+ [PTBR + 7]="01";
+ 
+ store(6,20);
+ 
+alias pid S10;
+pid=(PTBR-1024)/8;
+alias systemfiletableindex S11; 		// to decrement filecount.
+counter=0;
+while(counter<8) do
+        systemfiletableindex=[ READY_LIST + pid*32 + 15 + 2*counter ];
+        if([ READY_LIST + pid*32 + 15 + 2*counter ]!=-1) then
+        	[FILE_TABLE + 2*systemfiletableindex +1]=[FILE_TABLE + 2*systemfiletableindex +1]-1;
+        
+        	if([FILE_TABLE + 2*systemfiletableindex +1]==0) then   	//invalidate the entry .
+             		[FILE_TABLE + 2*systemfiletableindex ]=-1;
+       		 endif;
+        
+		[ READY_LIST + pid*32 + 15 + 2*counter ]=-1;			//ppoft invalidate
+		[ READY_LIST + pid*32 + 15 + 2*counter + 1]=-1;
+	endif;
+	
+	counter=counter+1;
+endwhile;
+
+SP=3*512;
+breakpoint;
+[[PTBR + 2*( SP/512)]*512 + (SP%512)]=0;
+breakpoint;
+ireturn;
+
+endif;
+
+if(systemcall_no==11) then    //getpid   system call
+   alias pid S4;
+   pid=(PTBR-1024)/8;
+   [physicalSP-2]=pid;
+   ireturn;
+
+endif;
+
+if(systemcall_no==12) then 				//getppid system call 
+   alias PCB S4;
+    alias pid S5;
+   pid=(PTBR-1024)/8;
+   PCB=(READY_LIST + 32*pid);
+   [physicalSP-2]=[PCB + 31];
+   ireturn;
+   
+endif;
+   
+

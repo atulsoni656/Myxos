@@ -1,0 +1,133 @@
+alias cause S0;
+alias vPagenum S1;
+alias ip_addr S2;
+
+cause = EFR % 10;		// Gets value of cause field (size 1 char)
+vPagenum = (EFR / 10) % 100;    // Gets value of BadVAddr 
+ip_addr = (EFR/1000);		//Gets value of IP at the point of exception
+
+alias physicalSP S9;
+physicalSP = ([PTBR + 2 * (SP/512)] * 512) + (SP % 512);
+
+//print the cause of the exception and exit if cause is not 0 (page fault)
+if (cause == 1) then
+	print "Invalid instruction";
+endif;
+if (cause == 2) then
+	print "Illegal memory access";
+endif;
+if (cause == 3) then
+	print "Arithmetic exception";
+endif;
+if (cause == 4) then
+	print "Illegal operands";
+endif;
+
+if (cause != 0) then
+	SP = SP + 2;
+	[physicalSP + 1] = 10;
+	inline "JMP 11776";		//to exit the process use the exit code in INT 7 for all causes except 0 (pg fault)
+endif;
+
+if ([PTBR + 2*vPagenum] == -1) then	//indicates invalid page
+	print "Invalid address reference";
+	SP = SP + 2;
+	[physicalSP + 1] = 10;
+	inline "JMP 11776";		//the currently running process has to exit
+endif;
+
+alias counter S3;
+alias freePage S4;
+
+counter = 0;
+while (counter < 64) do
+	if ([MEM_LIST + counter] == 0) then		//search for a free page to allocate to this process
+		[MEM_LIST + counter] = 1;	//allocate it to the process
+
+		freePage = counter;
+		break;
+	endif;
+	counter = counter + 1;
+endwhile;
+
+//Second Chance Algorithm
+if (counter == 64) then		//no free page was found, so must run page replacement algo
+	alias i S5;
+	i = vPagenum + 1;		//start from the very next page...
+	counter = (PTBR - 1024)/8;	//...of the current page table
+	alias search S6;
+	alias flag S8;
+	flag = 0;
+
+	while (1) do			//circularly search page table
+		alias PT S7;
+		PT = PAGE_TABLE + ((counter * 8) % 256);	//go to every process's page table
+
+		while (i < 3) do					//then check each of its entries
+			if ([PT + i*2 + 1] == "01" && [MEM_LIST + [PT + i*2]] <= 1) then	//REPLACE this page --> reference bit is 0 AND page is NOT SHARED
+				
+				freePage = [PT + i*2];	//this is the page that is going to be allocated to the page fault 
+
+				search = 0;
+				while (search < 64) do
+					if ([DISK_LIST + 448 + search] == 0) then	//search for a free page in swap area
+						[DISK_LIST + 448 + search] = 1;		//indicates that it is used now
+
+						store ([PT + i*2], (448 + search));	//store the page to the disk
+
+						[PT + i*2] = 448 + search;	//update page table entry with the block 											  number in the disk
+						[PT + i*2 + 1] = "00";	//now invalid
+
+						break;	//IMPORTANT
+					endif;
+
+					search = search + 1;
+				endwhile;
+
+				if (search == 64) then	//no free block in the swap area --> exit the process
+					SP = SP + 2;
+					[physicalSP + 1] = 10;
+					
+					inline "JMP 11776";
+				else
+					flag = 1;		//indicates that page replacement is done
+					break;
+				endif;
+
+			endif;
+
+			if ([PT + i*2 + 1] == "11") then	//flip the reference bit to 0 if 1
+				[PT + i*2 + 1] = "01";
+			endif;
+
+			i = i + 1;
+		endwhile;
+
+		if (flag == 1) then 	//page replacement is over successfully
+			break;
+		endif;
+
+		i = 0;
+		counter = counter + 1;
+	endwhile;
+endif;
+
+store (6, 20);	//changes have been made to the Disk List therefore COMMIT BACK
+
+if ([PTBR + 2*vPagenum] < 448) then
+	load (freePage, [PTBR + 2*vPagenum]);		//now load the codeBlock to the free page available
+
+else								//else it is in the swap area
+	load (freePage, [PTBR + 2*vPagenum]);
+	[DISK_LIST + [PTBR + 2*vPagenum]] = [DISK_LIST + [PTBR + vPagenum]] - 1;	//no longer in swap area of disk
+endif;
+
+[PTBR + 2*vPagenum] = freePage;	
+[PTBR + 2*vPagenum + 1] = "11";	
+
+SP = SP + 1;	// ip_addr on top
+physicalSP = ([PTBR + 2 * (SP/512)] * 512) + (SP % 512);
+
+[physicalSP] = ip_addr;		
+
+ireturn;

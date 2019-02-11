@@ -1,0 +1,132 @@
+alias cause S0;
+alias vpagenum S1;
+alias ip_add S2;
+alias physical_page S3;
+alias x S4;
+alias flag S5;
+alias free_page S6;
+alias y S7;
+alias temp S8;
+alias z S9;
+alias flag1 S10;
+alias current_ptbr S11;
+alias current_pid S12;
+alias physicalsp S13;
+
+cause=EFR%10;     //EFR structure -5 2 1
+vpagenum=(EFR/10) % 100;
+ip_add=(EFR/1000);
+
+physicalsp=([PTBR + 2 * (SP/512)] * 512) + (SP % 512);
+
+if(cause!=0) then
+	if(cause==1) then
+		print(ip_add);
+		print("error: illegal instruction");
+	endif;
+
+	if(cause==2) then
+		print(ip_add);
+		print("error: illegal memory access");
+	endif;
+	if(cause==3) then
+		print(ip_add);
+		print("error: arithmetic exception");
+	endif;
+	if(cause==4) then
+		print(ip_add);
+		print("error: illegal operands");
+	endif;
+	SP = SP + 2;
+	[physicalsp + 1] = 10;
+	inline "JMP 11776";
+endif;
+
+if(cause==0) then
+	if([PTBR+(2*(vpagenum/512))]==-1) then   //if its an invalid page then exit the process
+		SP = SP + 2;
+		[physicalsp + 1] = 10;  //syscallno=10 ......exit syscallno
+		inline "JMP 11776";
+	endif;
+	flag1=0;
+	x=0;
+	while(x<64) do      //search for a free page in the memory free list
+		if([MEM_LIST+x]==0) then
+			flag1=1;
+			free_page=x;
+			[MEM_LIST+x]=1;
+			break;
+		endif;
+		x=x+1;
+	endwhile;
+	
+	if(flag1==0) then                   //if a free page is not found then use second chance algorithm.
+		current_ptbr=PTBR;
+		current_pid=(PTBR-1024)/8;
+		y=(vpagenum+1);         //y has the virtual page number
+		x=(current_ptbr+(2*y));  //x has the physical page numbers of the page table area
+
+		while(1) do
+			if([x+1]=="11" ) then    //if the refernce bit is 1
+				[x+1]="01";
+			endif;
+
+			if(y!=3 && [x+1]=="01" && [MEM_LIST+[x]]<=1) then      //if reference bit is 0 & the replcement page should not be 											 the stack page
+				z=448;
+				flag=0;
+				while(z<512) do        //to find a free swap block in disk to swap out the memory page to be replaced
+					if([DISK_LIST+z]==0) then
+						flag=1;
+						store([x],z);  //if a page is found then store the page to be replaced
+						[DISK_LIST+z]=1;   //increment count of the swap
+						free_page=[x];
+						[x]=z; //to update the page in page table as the disk blk no in swap area
+						[x+1]="00"; //set the page as invalid
+						break;
+					endif;
+					z=z+1;
+				endwhile;
+				if(flag==0) then   //if there is no space in swap area in the disk then exit
+					SP = SP + 2;
+					[physicalsp + 1] = 10;  //syscallno=10 ......exit syscallnosz3
+					inline "JMP 11776";
+				endif;
+			endif;
+
+			if(flag==1) then
+				break;
+			endif;
+
+			y=(y+1)%4;
+			if(y==0) then
+				current_pid=(current_pid+1)%32;
+				current_ptbr=PAGE_TABLE+(current_pid*8);
+			endif;
+			x=(current_ptbr+(2*y));
+		endwhile;
+	endif;
+		
+
+		x=[PTBR+(2*vpagenum)]; //physical page number of the virtual page
+
+		if(x>=21 && x<448) then      ////if the page which caused page fault is containg disk blocks other than swap area
+			load(free_page,x);
+		endif;
+
+		if(x>=448 && x<512) then     //if the block no in the page faulted page is swap area block from disk
+			load(free_page,x);
+			[DISK_LIST+x]=[DISK_LIST+x]-1;
+		endif;
+
+		[PTBR+(2*vpagenum)]=free_page;
+		[PTBR+(2*vpagenum)+1]="11";
+
+		store(6,20); //store back the disk free list
+
+		SP=SP+1;
+		[(512*[PTBR+(2*((SP)/512))])+((SP)%512)]=ip_add;   //store the ip_add on the top of the stack
+		
+ireturn;
+endif;
+
+

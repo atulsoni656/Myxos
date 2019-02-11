@@ -1,0 +1,97 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+alias systemcall_no S1;
+
+systemcall_no=[physicalSP-1];
+
+if(systemcall_no==6) then			//impplementation of Seek system call.
+  alias filedesc S2;
+  alias newlseek S3;
+  filedesc=[physicalSP-4];
+  newlseek=[physicalSP-3];
+
+	if(filedesc<0 || filedesc>7) then
+		[physicalSP-2]=-1;
+		ireturn;
+	endif;
+
+   alias pid S4;
+   pid=(PTBR-1024)/8;
+	if([ READY_LIST + pid*32 + 15 + 2*filedesc ]==-1) then 
+	     [physicalSP-2]=-1;
+		ireturn;
+        endif;
+        
+  alias systemfiletableindex S5;          	//go to SWOFT and get fatindex then filesize.
+  systemfiletableindex=[ READY_LIST + pid*32 + 15 + 2*filedesc ] ;
+  alias fatindex S6;
+  fatindex=[FILE_TABLE + 2*systemfiletableindex];
+ 
+  alias filesize S7;
+  filesize=[FAT + 8*fatindex + 1];
+
+	if(newlseek<0 || newlseek>=filesize) then
+          [physicalSP-2]=-1;
+	  ireturn;
+	endif;
+
+   [ READY_LIST + pid*32 + 15 + 2*filedesc + 1]=newlseek;
+
+  [physicalSP-2]=0;
+  	ireturn;
+
+endif;
+
+
+if(systemcall_no==7) then			//impplementation of Read system call.
+
+  alias filedesc S2;
+  alias wordread S3;
+  filedesc=[physicalSP-4];
+  wordread=[physicalSP-3];
+  
+  if(filedesc<0 || filedesc>7) then
+	[physicalSP-2]=-1;
+	ireturn;
+  endif;
+
+  alias pid S4;
+  pid=(PTBR-1024)/8;
+	if([ READY_LIST + pid*32 + 15 + 2*filedesc ]==-1) then 
+	     [physicalSP-2]=-1;
+		ireturn;
+        endif;
+  alias systemfiletableindex S5;
+  alias lseek S6;
+  systemfiletableindex=[ READY_LIST + pid*32 + 15 + 2*filedesc ] ;
+  lseek=[ READY_LIST + pid*32 + 15 + 2*filedesc +1];
+ 
+  alias fatindex S7;
+  fatindex=[FILE_TABLE + 2*systemfiletableindex];
+
+  alias basicblock S8;
+  basicblock=[FAT + fatindex*8 + 2];
+  
+  load(1,basicblock);
+  alias filesize S9;
+  filesize=[FAT + 8*fatindex + 1];
+  
+  if(lseek==filesize) then
+    [physicalSP-2]=-1;
+    ireturn;
+  endif;
+
+  alias datablock S10;
+  datablock=[SCRATCHPAD + (lseek/512)];
+    
+  load(1,datablock);
+  wordread=[SCRATCHPAD + (lseek%512)];
+  [physicalSP-3]=wordread;
+  
+  [ READY_LIST + pid*32 + 15 + 2*filedesc +1]=[ READY_LIST + pid*32 + 15 + 2*filedesc +1]+1;	//increment the lseek position.
+  
+  [physicalSP-2]=0;
+    ireturn;
+
+endif;
+

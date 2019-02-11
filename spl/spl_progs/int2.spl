@@ -1,0 +1,135 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP/512)] * 512) + (SP % 512);	//calc physicalSP to get sysCallNo, arg ...
+
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1];	//sysCallNo is -1
+
+alias counter S2;
+
+if (sysCallNo == 2) then	//sysCallNo 2 --> OPEN
+	alias fileName S3;
+	fileName = [physicalSP - 3];	//fileName is below return value
+	
+	counter = 0;
+	alias FAT_index S4;
+	alias flag S5;
+	alias openTable S6;
+	flag = 0;
+	
+	while (counter < 64) do
+		if ([FAT + (8 * counter)] == fileName) then    //search FAT to see if file exists
+			FAT_index = FAT + (8 * counter);		  //store the FAT index (2560 + ...)
+			
+			counter = 0;
+			while (counter < 64) do
+				if ([FILE_TABLE + (2 * counter)] == FAT_index) then	//checking in system wide open table to see if 																		  file is already open and has an entry
+					openTable = FILE_TABLE + (2 * counter);    //if so save the index of the entry
+					flag = 1;								//set flag to indicate entry already exists
+					break;
+				endif;
+				
+				counter = counter + 1;
+			endwhile;
+			
+			if (flag == 0) then	  //no entry in system wide open file table
+				counter = 0;
+				while (counter < 64) do
+					if ([FILE_TABLE + (2 * counter)] == -1) then	//checking in system wide open table to see if 																		  there is a free entry
+						openTable = FILE_TABLE + (2 * counter);	//if so save the index of the free entry
+						flag = 1;			//now set flag to indicate free entry is available
+						break;
+					endif;
+				
+					counter = counter + 1;
+				endwhile;	
+			endif;
+			
+			if (flag == 0) then			//if flag is still 0 no free entry is available in system wide open file 											  table --> failure
+				[physicalSP - 2] = -1;
+				ireturn;
+			endif;
+			
+		endif;
+		
+		if (flag == 1) then 	//fileName was found and a entry with fileName or free entry was found in system 									  wide open file table
+			alias PID S7;
+			PID = (PTBR - 1024)/8;		//find PID so that PCB can be found
+			
+			alias PCB S8;
+			PCB = READY_LIST + (PID * 32);	//using PID find PCB
+			
+			counter = 0;
+			while (counter < 8) do 
+				if ([PCB + 15 + (counter * 2)] == -1) then	//check for a free entry in per-process open file 																  table (15-30 in PCB)
+					alias PPOFTI S9;
+					PPOFTI = counter;
+					[PCB + 15 + (counter * 2)] = openTable;	//1st entry is pointer to system-wide file table entry
+					[PCB + 15 + (counter * 2) + 1] = 0;		//and 2nd is LSEEK position
+					
+					[openTable] = FAT_index;	//system-wide open file table points to FAT index
+					[openTable + 1] = [openTable + 1] + 1;	//incrementing File Open Count by 1
+					
+					[physicalSP - 2] = PPOFTI;	//successful, return index of the per-process open file table 													  entry
+					ireturn;
+				endif;
+				
+				counter = counter + 1;
+			endwhile;
+				
+		endif;
+		
+		counter = counter + 1;	 	
+	endwhile;	
+	
+	
+	[physicalSP - 2] = -1;	//if file doesn't exist in FAT --> failure
+	ireturn;
+	
+endif;
+
+
+
+
+
+
+if (sysCallNo == 3) then		//sysCallNo 3 --> CLOSE
+	alias fileDescriptor S3;
+	fileDescriptor = [physicalSP - 3];
+	
+	if (fileDescriptor < 0 || fileDescriptor > 7) then	//fileDescriptor can only be between 0 and 7 as a single 															  process can only have 8 open files at a time
+		[physicalSP - 2] = -1;		//if invalid --> failure
+		ireturn;
+		
+	endif;
+	
+	alias PID S4;
+	PID = (PTBR - 1024)/8;		//find PID so that PCB can be found
+	alias PCB S5;
+	PCB = READY_LIST + (PID * 32);	//using PID find PCB
+	
+	alias PPOFTI S6;
+	PPOFTI = PCB + 15 + (fileDescriptor * 2);	//address of the per process open file table entry for the file
+	
+	alias SWOFT S7;	//to store system wide open file table entry
+
+	if ([PPOFTI] == -1) then
+		[physicalSP - 2] = -1;		//fileDescriptor valid but entry is empty --> failure
+		ireturn;
+		
+	else
+		SWOFT = [PPOFTI];	//store the system wide open file table entry number
+	endif;
+	
+	[DISK_LIST + 2*SWOFT + 1] = [DISK_LIST + 2*SWOFT + 1] - 1;	//decrementing File Open Count by 1;
+	
+	if ([DISK_LIST + 2*SWOFT + 1] == 0) then
+		[DISK_LIST + 2*SWOFT] = -1;	//if File Open Count becomes 0 then invalidate the entry by setting FAT Index entry to -1
+	endif;
+	
+	[PPOFTI] = -1;	//now invalidate the entry in per process open file table in PCB (what about before system 						  wide open file table?)
+	[PPOFTI + 1] = -1;	//set LSEEK Position to -1 (invalid)
+	
+	[physicalSP - 2] = 0;	//successful, return 0
+	ireturn;
+endif;
+

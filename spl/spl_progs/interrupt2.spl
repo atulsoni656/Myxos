@@ -1,0 +1,126 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+alias systemcall_no S1;
+systemcall_no=[physicalSP-1];
+
+
+if ( systemcall_no == 2) then     // Implementation of Open system call.
+  alias argument S2;
+  argument=[physicalSP-3];
+  alias count S3;
+  count=FAT;
+  alias fatindex S4;
+  alias flag S5;
+  flag=0;
+  while(count<(FAT+512)) do				//check whether file already exists.
+     	if([count]==argument)  then
+		   fatindex=(count-FAT)/8;             //storing fat index in register.
+		   flag=1;
+		   break;		
+        endif;
+        count=count+8;
+  endwhile;
+  if(flag==0) then
+    [physicalSP-2]=-1;
+    ireturn;
+  endif;
+  
+  flag=0;
+  alias systemfiletableindex S6;			//checking whether file is already open or not.
+  count= 0;
+while ( count <  128) do			// 64 entries, each of size 2 words
+	if([FILE_TABLE + count]==fatindex) then
+	      systemfiletableindex=count/2;	//storing index of sytem-wide open file table.
+	      flag=1;
+	      break;
+	endif;
+	count = count + 2;			// Move to next entry
+endwhile;
+  
+     if(flag==0) then				//file is not open..so checking for free entry in system wide file open table.
+     count= 0;
+     alias sytemfiletablefreeindex S7;
+		while ( count <  128) do			// 64 entries, each of size 2 words
+			if([FILE_TABLE + count]==-1) then
+	      		    systemfiletableindex=count/2;	//storing index of free index of system-wide open file table.
+	      		    flag=1;
+	      		    break;
+			endif;
+			count = count + 2;			// Move to next entry
+		endwhile;
+                if(flag==0) then				//we didnot found free entry,return.
+                [physicalSP-2]=-1;
+    		ireturn;
+  		endif;
+                 
+     endif;
+     
+ alias pid S8;
+ pid=(PTBR-1024)/8;
+ count = 15;
+ flag=0;
+ alias processfiletablefreeindex S9;                  //check free entry in per process open file table.
+while ( count < 31) do			
+	if([ READY_LIST + pid*32 + count ]==-1) then 
+		processfiletablefreeindex=(count-15)/2;
+		[ READY_LIST + pid*32 + count + 0]=systemfiletableindex;   //allocating new entry.
+		[ READY_LIST + pid*32 + count + 1]=0;
+		flag=1;
+		break;
+	endif;
+	count = count + 2;			
+endwhile; 
+ 
+if(flag==0) then
+    [physicalSP-2]=-1;
+    ireturn;
+endif;	
+
+[FILE_TABLE + 2*systemfiletableindex ]= fatindex;
+[FILE_TABLE + 2*systemfiletableindex + 1]=[FILE_TABLE + 2*systemfiletableindex + 1] + 1;
+
+[physicalSP - 2] = processfiletablefreeindex;
+ireturn;		
+endif;
+
+
+
+if(systemcall_no==3) then             //to implement close system call..filedesc is file_descriptor..
+alias filedesc S2;
+filedesc=[physicalSP-3];
+alias count S3;
+alias flag S4;
+
+	if(filedesc<0 || filedesc>7) then
+		[physicalSP-2]=-1;
+		ireturn;
+	endif;
+alias pid S5;
+pid=(PTBR-1024)/8;
+flag=0;
+	if([ READY_LIST + pid*32 + 15 + 2*filedesc ]==-1) then 
+	     [physicalSP-2]=-1;
+		ireturn;
+        endif;
+        alias systemfiletableindex S6; 		//decrement filecount.
+        systemfiletableindex=[ READY_LIST + pid*32 + 15 + 2*filedesc ];
+        
+  alias fatindex S8;
+  fatindex=[FILE_TABLE + 2*systemfiletableindex];
+  
+ 
+      
+        [FILE_TABLE + 2*systemfiletableindex +1]=[FILE_TABLE + 2*systemfiletableindex +1]-1;
+        
+        if([FILE_TABLE + 2*systemfiletableindex +1]==0) then   	//invalidate the SWOFT entry .
+             [FILE_TABLE + 2*systemfiletableindex ]=-1;
+        endif;
+        
+	[ READY_LIST + pid*32 + 15 + 2*filedesc ]=-1;			//PPOFT invalidate.
+	[ READY_LIST + pid*32 + 15 + 2*filedesc + 1]=-1;
+	
+	[physicalSP-2]=0;
+		ireturn;
+	
+endif;

@@ -1,0 +1,182 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2* (SP / 512)] * 512) + (SP % 512);
+alias systemcall_no S1;
+systemcall_no=[physicalSP-1];
+
+alias counter S2;
+
+if(systemcall_no==8) then   		//implementing FORK system call.
+ 	counter=1;
+ 	alias freePCB S3;
+		while(counter<1024) do
+ 			 if([READY_LIST + counter]==0) then
+ 			   freePCB= READY_LIST + counter -1;  		//free PCB found.
+ 			   break;
+		         endif;
+  		counter=counter+32;
+		endwhile;
+
+	if(counter==1025) then
+  	[physicalSP-2]=-1;
+  	ireturn;
+  	endif;
+  
+
+alias count S4;
+ alias parentpage S6;
+ alias childpage S7;
+ 
+ [freePCB]=(freePCB-READY_LIST)/32;
+  	
+  	alias childPTBR S5;
+  	childPTBR=(1024 + 8*[freePCB]);
+ 
+counter=0;
+alias count1 S11;
+count1 = 0;
+	while(counter<64) do
+		  if([MEM_LIST + counter]==0) then
+		   count1 = count1 + 1;
+		   if(count1==1) then
+		       	[MEM_LIST + counter]=1;
+   	    	   	[childPTBR + 6]=counter;
+   	    	   	[childPTBR + 7]="01";
+		       parentpage=[PTBR + 6 ]*512;
+   	    	   	childpage=counter*512;
+   	    	   
+   	    	  	count=0;
+   	    	   	while(count<512) do
+   	    	   	 	[childpage +count]=[parentpage + count];
+   	    	   	 	count=count+1;
+   	    	   	endwhile;
+   	    	   	break;
+		   endif;
+		  endif;
+	 counter=counter+1;
+	endwhile;
+
+alias count2 S12;
+alias victim S13;
+alias flag S14;
+alias PCB S9;
+
+if(count1 == 0) then
+	  counter=PTBR ;
+	count=0;
+	while(1) do
+	    while(count<3) do
+	         if(([counter + 2*count + 1]=="01") && ([MEM_LIST + [counter + 2*count]] <= 1)) then
+	            victim=[counter + 2*count];
+	              count2 = 448;
+	              while(count2 < 512) do
+	                 if([DISK_LIST + count2]==0) then
+	                    [DISK_LIST + count2]=1;
+	                    store(victim,count2);
+	                     [counter + 2*count] = count2;
+	                     [counter + 2*count + 1] = "00";
+	                    break;
+	                 endif;
+	                 count2 = count2 + 1;
+	              endwhile;
+	              if(count2 == 512) then
+	                 [physicalSP - 2] = -1;
+	                 ireturn;
+	              endif;
+	             
+	             [childPTBR + 6]=victim;
+   	    	   	 [childPTBR + 7]="01";
+	              flag = 1;
+	            break;
+	         endif;
+	         
+	         
+	          if([counter + 2*count + 1]=="11") then
+	              [counter + 2*count + 1]="01";
+	          endif;
+	         count=count+ 1;        
+	   endwhile;
+	   
+	   if (flag == 1) then
+	   		break;
+	   	endif;
+	   count=0;
+	   counter=(1024 + ((counter-1024) + 8) % 256);
+   endwhile;
+   
+     parentpage=[PTBR + 6 ]*512;
+   	 childpage=[childPTBR + 6 ]*512;
+	 count=0;
+   	    	   	while(count<512) do
+   	    	   	 	[childpage +  count]=[parentpage + count];
+   	    	   	 	count = count+1;
+   	    	   	endwhile;
+	
+endif;
+
+ store(6,20);
+	 
+ counter=0;
+ 
+ while(counter<6) do
+   	if(([PTBR + counter +1]=="01") ||  ([PTBR + counter +1]=="11")) then
+          parentpage = [PTBR + counter];
+          [MEM_LIST + parentpage ]= [MEM_LIST + parentpage ] + 1;
+    endif;
+    if([PTBR + counter]>=448) then
+            parentpage=[PTBR + counter];
+            [DISK_LIST + parentpage]=[DISK_LIST + parentpage] + 1;
+    endif;
+	
+	[childPTBR + counter]=[PTBR + counter];
+	[childPTBR + counter +1]=[PTBR + counter +1];
+	counter=counter+2;
+ endwhile;
+ 
+ store(6,20);
+ 
+
+			[freePCB + 6] = PTLR;			
+			[freePCB + 5] = childPTBR;		
+			[freePCB + 4] = [physicalSP];	
+			[freePCB + 3] = SP - 1;			
+			[freePCB + 2] = BP;				
+			[freePCB + 7] = R0;				
+			[freePCB + 8] = R1;				
+			[freePCB + 9] = R2;				
+			[freePCB + 10] = R3;			
+			[freePCB + 11] = R4;			
+			[freePCB + 12] = R5;
+			[freePCB + 13] = R6;
+			[freePCB + 14] = R7;	
+			
+			[freePCB + 31] = (PTBR-1024)/8;
+			
+  alias systemwidetableindex S8;
+  
+  PCB=READY_LIST + 32*(PTBR-1024)/8;
+  counter=0;
+   	while(counter<16) do
+   	 	[freePCB + 15 + counter]=[PCB + 15 + counter];
+   	 	[freePCB + 15 + counter +1]=[PCB +15 + counter +1];
+   	 	
+   	 	if([freePCB + 15 + counter]!= -1) then
+   	 	  systemwidetableindex=[freePCB + 15 + counter];
+   	 	  [FILE_TABLE + 2*systemwidetableindex + 1]=[FILE_TABLE + 2*systemwidetableindex + 1]+1;
+   	 	endif;
+   	 counter=counter+2;
+   	 endwhile;
+   	 
+   	 [freePCB + 1]=1;
+   	 
+   	 [physicalSP-2]=[freePCB];
+   	 
+   	 alias childSP S10;
+   	 childSP=([childPTBR + 2* ((SP-1) / 512)] * 512) + ((SP-1) % 512);
+   	 [childSP-1]=-2;
+   	 
+   	 
+   	 ireturn;
+   	  	
+   	 	
+endif;
+ 
